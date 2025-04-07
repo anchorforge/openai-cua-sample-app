@@ -6,6 +6,7 @@ from playwright.sync_api import Browser
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 import requests
+import base64
 
 from .base_playwright import BasePlaywrightComputer
 
@@ -65,7 +66,6 @@ class AnchorBrowser(BasePlaywrightComputer):
         For Anchor, we don't have direct browser/page objects, but we simulate them
         for compatibility with the BasePlaywrightComputer interface.
         """
-        # Create a session with Anchor API
         width, height = self.dimensions
         response = requests.post(
             f"{self.base_url}/sessions",
@@ -125,23 +125,95 @@ class AnchorBrowser(BasePlaywrightComputer):
 
     def screenshot(self) -> str:
         """
-        Capture a screenshot of the current viewport using CDP.
-
+        Capture a screenshot using Anchor's API directly.
+        
         Returns:
             str: A base64 encoded string of the screenshot.
         """
-        try:
-            # Get CDP session from the page
-            cdp_session = self._page.context.new_cdp_session(self._page)
-
-            # Capture screenshot using CDP
-            result = cdp_session.send(
-                "Page.captureScreenshot", {"format": "png", "fromSurface": True}
-            )
-
-            return result["data"]
-        except PlaywrightError as error:
-            print(
-                f"CDP screenshot failed, falling back to standard screenshot: {error}"
-            )
+        if not self.session_id:
+            print("No active session, falling back to standard screenshot")
             return super().screenshot()
+            
+        try:
+            response = requests.get(
+                f"{self.base_url}/sessions/{self.session_id}/screenshot",
+                headers={"anchor-api-key": f"{self.api_key}"},
+            )
+            
+            if not response.ok:
+                print(f"Anchor screenshot failed with status {response.status_code}, falling back to standard screenshot")
+                return super().screenshot()
+                
+            return response.text
+            
+        except Exception as error:
+            print(f"Anchor screenshot failed, falling back to standard screenshot: {error}")
+            return super().screenshot()
+
+    def click(self, x: int, y: int, button: str = "left") -> None:
+        """
+        Click at the specified coordinates using Anchor's API directly.
+        
+        Args:
+            x: The x-coordinate to click.
+            y: The y-coordinate to click.
+            button: The mouse button to use ('left', 'right', 'back', 'forward', 'wheel').
+        """
+        if button in ["back", "forward", "wheel"]:
+            return super().click(x, y, button)
+            
+        if not self.session_id:
+            print("No active session, falling back to standard click")
+            return super().click(x, y, button)
+            
+        try:
+            button_mapping = {"left": "left", "right": "right"}
+            button_type = button_mapping.get(button, "left")
+            
+            # Use Anchor's API to perform the click
+            response = requests.post(
+                f"{self.base_url}/sessions/{self.session_id}/mouse/click",
+                headers={"anchor-api-key": f"{self.api_key}"},
+                json={
+                    "x": x,
+                    "y": y,
+                    "button": button_type
+                }
+            )
+            
+            if not response.ok:
+                print(f"Anchor click failed with status {response.status_code}, falling back to standard click")
+                super().click(x, y, button)
+                
+        except Exception as error:
+            print(f"Anchor click failed, falling back to standard click: {error}")
+            super().click(x, y, button)
+
+    def type(self, text: str) -> None:
+        """
+        Type text using Anchor's API directly.
+        
+        Args:
+            text: The text to type.
+        """
+        if not self.session_id:
+            print("No active session, falling back to standard type")
+            return super().type(text)
+            
+        try:
+            response = requests.post(
+                f"{self.base_url}/sessions/{self.session_id}/keyboard/type",
+                headers={"anchor-api-key": f"{self.api_key}"},
+                json={
+                    "text": text,
+                    "delay": 30
+                }
+            )
+            
+            if not response.ok:
+                print(f"Anchor type failed with status {response.status_code}, falling back to standard type")
+                super().type(text)
+                
+        except Exception as error:
+            print(f"Anchor type failed, falling back to standard type: {error}")
+            super().type(text)
