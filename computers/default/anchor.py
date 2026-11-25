@@ -16,7 +16,7 @@ load_dotenv()
 class AnchorBrowser(BasePlaywrightComputer):
     """
     Computer implementation for Anchor browser (https://anchorbrowser.io)
-    Requires an API key in the .env file as ANCHOR_API_KEY
+    Requires an API key in the .env file as ANCHORBROWSER_API_KEY (ANCHOR_API_KEY also works)
 
     IMPORTANT: The `goto` and navigation tools are already implemented and recommended
     when using the Anchor computer to help the agent navigate more effectively.
@@ -36,13 +36,12 @@ class AnchorBrowser(BasePlaywrightComputer):
     ):
         """Initialize the Anchor browser session"""
         super().__init__()
-        self.api_key = os.getenv("ANCHOR_API_KEY")
+        self.api_key = os.getenv("ANCHORBROWSER_API_KEY") or os.getenv("ANCHOR_API_KEY")
         if not self.api_key:
-            raise ValueError("ANCHOR_API_KEY not found in .env file")
+            raise ValueError("ANCHORBROWSER_API_KEY (or ANCHOR_API_KEY) not found in .env file")
 
         self.debug = debug
-        self.base_url = "https://api.anchorbrowser.io/api"
-        self.base_ws_url = "wss://connect.anchorbrowser.io"
+        self.base_url = "https://api.anchorbrowser.io/v1"
         self.session_id = None
         self.dimensions = (width, height)
         self.proxy_config = {"active": proxy_active}
@@ -71,25 +70,31 @@ class AnchorBrowser(BasePlaywrightComputer):
             f"{self.base_url}/sessions",
             headers={"anchor-api-key": f"{self.api_key}"},
             json={
-                "width": width,
-                "height": height,
-                "useProxy": self.proxy_config["active"],
-                "solveCaptcha": self.captcha_config["active"],
-                "sessionTimeout": self.timeout,
-                "sessionIdleTimeout": self.idle_timeout,
-                "adBlocker": self.adblock_config["active"],
-                "popupBlockingActive": self.adblock_config["popup_blocking_active"],
-                "headless": False,
+                "session": {
+                    "proxy": {"active": self.proxy_config["active"]},
+                    "timeout": {
+                        "max_duration": self.timeout,
+                        "idle_timeout": self.idle_timeout,
+                    },
+                },
+                "browser": {
+                    "viewport": {"width": width, "height": height},
+                    "captcha_solver": {"active": self.captcha_config["active"]},
+                    "adblock": {"active": self.adblock_config["active"]},
+                    "popup_blocker": {
+                        "active": self.adblock_config["popup_blocking_active"]
+                    },
+                    "headless": {"active": False},
+                },
             },
         )
         response.raise_for_status()
-        self.session_id = response.json().get("id")
+        session = response.json().get("data", {})
+        self.session_id = session.get("id")
         if not self.session_id:
             raise ValueError("Failed to create Anchor browser session")
 
-        browser = self._playwright.chromium.connect_over_cdp(
-            f"{self.base_ws_url}/?sessionId={self.session_id}"
-        )
+        browser = self._playwright.chromium.connect_over_cdp(session["cdp_url"])
         context = browser.contexts[0]
         context.on("page", self._handle_new_page)
         page = context.pages[0]
